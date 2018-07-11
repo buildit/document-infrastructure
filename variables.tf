@@ -15,7 +15,7 @@ variable "default_cpu" {
 
 variable "default_memory" {
   description = "Fargate instance memory to provision (in MiB)"
-  default     = "512"
+  default     = "1024"
 }
 
 variable "default_count" {
