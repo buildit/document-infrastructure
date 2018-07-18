@@ -1,6 +1,32 @@
-variable "document_uploader_image" {
-  description = "Docker image to run in the ECS cluster"
-  default     = "builditdigital/document-uploader:latest"
+locals {
+  document_uploader_image                = "${var.document_uploader_image_name}:${var.document_uploader_image_version}"
+  document_uploader_alb_path             = "${var.document_uploader_base_path}*"
+  document_uploader_alb_health_check_url = "${var.document_uploader_base_path}/${var.document_uploader_alb_health_check_path}"
+  document_uploader_iam_user_name = "${var.document_uploader_app_name}-${var.env}-user"
+}
+
+variable "document_uploader_app_name" {
+  default = "document_uploader"
+}
+
+variable "document_uploader_image_name" {
+  default = "builditdigital/document-uploader"
+}
+
+variable "document_uploader_image_version" {
+  default = "latest"
+}
+
+variable "document_uploader_image_port" {
+  default = 8080
+}
+
+variable "document_uploader_base_path" {
+  default = "/uploader"
+}
+
+variable "document_uploader_alb_health_check_path" {
+  default = "/health"
 }
 
 variable "document_uploader_port" {
@@ -9,7 +35,7 @@ variable "document_uploader_port" {
 }
 
 resource "aws_iam_role" "document_uploader_task_execution_role" {
-  name = "document_uploader_task_execution_role"
+  name = "${var.document_uploader_app_name}_task_execution_role"
 
   assume_role_policy = <<EOF
 {
@@ -27,25 +53,38 @@ resource "aws_iam_role" "document_uploader_task_execution_role" {
 EOF
 }
 
+resource "aws_iam_user_policy_attachment" "document_uploader_policy_s3full" {
+  user       = "${aws_iam_user.uploader.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
 resource "aws_iam_role_policy_attachment" "document_uploader_policy_cloudwatch" {
-  role = "${aws_iam_role.document_uploader_task_execution_role.id}"
+  role       = "${aws_iam_role.document_uploader_task_execution_role.id}"
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchFullAccess"
 }
 
+resource "aws_iam_user" "uploader" {
+  name = "${local.document_uploader_iam_user_name}"
+}
+
+resource "aws_iam_access_key" "uploader" {
+  user = "${aws_iam_user.uploader.name}"
+}
+
 resource "aws_ecs_task_definition" "document_uploader" {
-  family                   = "document_uploader"
+  family                   = "${var.document_uploader_app_name}"
   network_mode             = "awsvpc"
   execution_role_arn       = "${aws_iam_role.document_uploader_task_execution_role.arn}"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "${var.default_cpu}"
-  memory                   = "${var.default_memory}"
+  cpu                      = "${var.default_ecs_cpu}"
+  memory                   = "${var.default_ecs_memory}"
 
   container_definitions = <<DEFINITION
 [
   {
-    "cpu": ${var.default_cpu},
-    "image": "${var.document_uploader_image}",
-    "memory": ${var.default_memory},
+    "cpu": ${var.default_ecs_cpu},
+    "image": "${local.document_uploader_image}",
+    "memory": ${var.default_ecs_memory},
     "name": "document_uploader",
     "networkMode": "awsvpc",
     "portMappings": [
@@ -58,26 +97,26 @@ resource "aws_ecs_task_definition" "document_uploader" {
         "logDriver": "awslogs",
         "options": {
             "awslogs-group": "${aws_cloudwatch_log_group.document_uploader.name}",
-            "awslogs-region": "${var.aws_region}",
+            "awslogs-region": "${var.region}",
             "awslogs-stream-prefix": "/ecs"
         }
     },
     "environment": [
       {
         "name": "cloud.aws.credentials.accessKey",
-        "value": ""
+        "value": "${aws_iam_access_key.uploader.id}"
       },
       {
         "name": "cloud.aws.credentials.secretKey",
-        "value": ""
+        "value": "${aws_iam_access_key.uploader.secret}"
       },
       {
         "name": "cloud.aws.s3.bucket",
-        "value": ""
+        "value": "${var.storage_bucket}-${var.env}"
       },
       {
         "name": "cloud.aws.region",
-        "value": "z"
+        "value": "${var.region}"
       }
     ]
   }
@@ -85,21 +124,20 @@ resource "aws_ecs_task_definition" "document_uploader" {
 DEFINITION
 }
 
-
 resource "aws_cloudwatch_log_group" "document_uploader" {
-  name              = "/ecs/document_uploader"
+  name = "/ecs/${var.document_uploader_app_name}"
 }
 
 resource "aws_cloudwatch_log_stream" "document_uploader" {
-  name           = "document_uploader"
+  name           = "${var.document_uploader_app_name}"
   log_group_name = "${aws_cloudwatch_log_group.document_uploader.name}"
 }
 
 resource "aws_ecs_service" "document_uploader" {
-  name            = "document_uploader_service"
+  name            = "${var.document_uploader_app_name}_service"
   cluster         = "${aws_ecs_cluster.main.id}"
   task_definition = "${aws_ecs_task_definition.document_uploader.arn}"
-  desired_count   = "${var.default_count}"
+  desired_count   = "${var.default_ecs_count}"
   launch_type     = "FARGATE"
 
   network_configuration {
@@ -109,7 +147,7 @@ resource "aws_ecs_service" "document_uploader" {
 
   load_balancer {
     target_group_arn = "${aws_alb_target_group.document_uploader_target_group.id}"
-    container_name   = "document_uploader"
+    container_name   = "${var.document_uploader_app_name}"
     container_port   = "${var.document_uploader_port}"
   }
 
@@ -120,7 +158,7 @@ resource "aws_ecs_service" "document_uploader" {
 
 # Traffic to the ECS Cluster should only come from the ALB
 resource "aws_security_group" "document_uploader_ecs_tasks" {
-  name        = "document_uploader_ecs_tasks"
+  name        = "${var.document_uploader_app_name}_ecs_tasks"
   description = "allow inbound access from the ALB only"
   vpc_id      = "${aws_vpc.main.id}"
 
@@ -140,14 +178,14 @@ resource "aws_security_group" "document_uploader_ecs_tasks" {
 }
 
 resource "aws_alb_target_group" "document_uploader_target_group" {
-  name        = "document-uploader-target-group"
+  name        = "${var.document_uploader_app_name}_target_group"
   port        = 80
   protocol    = "HTTP"
   vpc_id      = "${aws_vpc.main.id}"
   target_type = "ip"
 
   health_check {
-    path                = "/uploader/health"
+    path = "${local.document_uploader_alb_health_check_url}"
   }
 }
 
@@ -162,6 +200,6 @@ resource "aws_alb_listener_rule" "uploader" {
 
   condition {
     field  = "path-pattern"
-    values = ["/uploader"]
+    values = ["${local.document_uploader_alb_path}"]
   }
 }
