@@ -35,7 +35,7 @@ variable "document_uploader_port" {
 }
 
 resource "aws_iam_role" "document_uploader_task_execution_role" {
-  name = "${var.document_uploader_app_name}_task_execution_role"
+  name = "${var.document_uploader_app_name}_task_execution_role_${var.env}"
 
   assume_role_policy = <<EOF
 {
@@ -125,7 +125,7 @@ DEFINITION
 }
 
 resource "aws_cloudwatch_log_group" "document_uploader" {
-  name = "/ecs/${var.document_uploader_app_name}"
+  name = "/ecs/${var.document_uploader_app_name}_${var.env}"
 }
 
 resource "aws_cloudwatch_log_stream" "document_uploader" {
@@ -178,7 +178,7 @@ resource "aws_security_group" "document_uploader_ecs_tasks" {
 }
 
 resource "aws_alb_target_group" "document_uploader_target_group" {
-  name        = "${var.document_uploader_app_name}_target_group"
+  name        = "document-uploader-${var.env}"
   port        = 80
   protocol    = "HTTP"
   vpc_id      = "${aws_vpc.main.id}"

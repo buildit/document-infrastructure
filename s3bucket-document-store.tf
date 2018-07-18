@@ -8,5 +8,5 @@ variable "storage_bucket" {
 
 resource "aws_s3_bucket" "terraform_bucket" {
   bucket        = "${local.storage_bucket_name}"
-  force_destroy = "${var.env == "dev" ? true : false}"
+  force_destroy = "${var.env == "prod" ? false : true}"
 }

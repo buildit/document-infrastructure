@@ -29,7 +29,7 @@ variable "document_repository_alb_health_check_path" {
 }
 
 resource "aws_iam_role" "document_repository_task_execution_role" {
-  name = "${var.document_repository_app_name}_task_execution_role"
+  name = "${var.document_repository_app_name}_task_execution_role_${var.env}"
 
   assume_role_policy = <<EOF
 {
@@ -146,7 +146,7 @@ resource "aws_security_group" "document_repository_ecs_tasks" {
 }
 
 resource "aws_cloudwatch_log_group" "document_repository" {
-  name = "/ecs/${var.document_repository_app_name}"
+  name = "/ecs/${var.document_repository_app_name}_${var.env}"
 }
 
 resource "aws_cloudwatch_log_stream" "document_repository" {
@@ -170,7 +170,7 @@ resource "aws_alb_listener_rule" "document_repository" {
 }
 
 resource "aws_alb_target_group" "document_repository_target_group" {
-  name        = "${var.document_repository_app_name}_target_group"
+  name        = "document-repository-${var.env}"
   port        = 80
   protocol    = "HTTP"
   vpc_id      = "${aws_vpc.main.id}"
